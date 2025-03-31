@@ -1,0 +1,33 @@
+version: "3.1"
+
+intents:
+  - greet
+  - goodbye
+  - affirm
+  - deny
+  - ask_oil_extraction
+  - ask_sensor
+  - ask_well_status
+
+responses:
+  utter_greet:
+    - text: "Hello! I'm your oil well diagnostic assistant. How can I help you today?"
+
+  utter_goodbye:
+    - text: "Goodbye. Have a productive day!"
+
+  utter_default:
+    - text: "I'm not sure about that. Please rephrase your question about oil well operations."
+
+actions:
+  - action_rag_query
+  - action_sensor_query
+  - action_well_status
+
+session_config:
+  session_expiration_time: 60
+  carry_over_slots_to_new_session: true
+
+entities:
+  - sensor
+  - well_number

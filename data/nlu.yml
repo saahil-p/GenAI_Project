@@ -1,0 +1,93 @@
+version: "3.1"
+
+nlu:
+- intent: greet
+  examples: |
+    - hello
+    - hi
+    - good morning
+    - good evening
+    - good afternoon
+
+- intent: goodbye
+  examples: |
+    - goodbye
+    - bye
+    - see you later
+    - have a nice day
+
+- intent: affirm
+  examples: |
+    - yes
+    - correct
+    - that's right
+    - confirmed
+
+- intent: deny
+  examples: |
+    - no
+    - incorrect
+    - that's wrong
+    - not correct
+
+- intent: ask_oil_extraction
+  examples: |
+    - How does oil extraction work?
+    - Explain oil drilling methods.
+    - What are the different oil extraction techniques?
+    - How is crude oil extracted from the ground?
+    - Tell me about offshore oil drilling.
+    - What are the steps involved in oil extraction?
+    - How do companies extract oil from deep underground?
+
+- intent: ask_sensor
+  examples: |
+    - What is [ABER-CKGL](sensor)?
+    - Tell me about [P-PDG](sensor)
+    - What does [ESTADO-DHSV](sensor) measure?
+    - Information about [QGL](sensor)
+    - What is the purpose of [T-PDG](sensor)?
+    - Tell me everything about [P-ANULAR](sensor)
+    - What is [ESTADO-M1](sensor)?
+    - Information on [P-JUS-CKP](sensor)
+    - What does [T-TPT](sensor) measure?
+    - Tell me about [ESTADO-SDV-P](sensor)
+    - What is [QBS](sensor)?
+    - Information about [P-MON-CKGL](sensor)
+    - What does [ESTADO-W2](sensor) measure?
+    - Tell me about [T-JUS-CKP](sensor)
+    - What is [P-TPT](sensor)?
+    - Can you explain what [P-PDG](sensor) measures?
+    - What's the function of [ABER-CKGL](sensor)?
+    - How does the [QGL](sensor) sensor work?
+    - Describe the [T-TPT](sensor) sensor
+    - I need information on the [ESTADO-M1](sensor) sensor
+    - Explain the data from [P-ANULAR](sensor)
+    - Tell me the purpose of [ESTADO-DHSV](sensor)
+    - What kind of readings does [P-JUS-CKGL](sensor) provide?
+    - I'd like to know more about [ESTADO-XO](sensor)
+    - Explain the [QBS](sensor) sensor readings
+    - What's [T-PDG](sensor) used for?
+
+- intent: ask_well_status
+  examples: |
+    - What is the status of well [1](well_number)?
+    - What is the current status of well [2](well_number)?
+    - How is well [3](well_number) performing?
+    - Tell me about the status of well [4](well_number)
+    - Is well [5](well_number) operational?
+    - Check the status of well [6](well_number)
+    - How are the wells performing?
+    - What's the condition of well [7](well_number)?
+    - Is there any issue with well [8](well_number)?
+    - What's the performance of well [9](well_number)?
+    - Status update on well [10](well_number)
+    - Tell me about well [1](well_number) condition
+    - How is well [2](well_number) functioning?
+    - What's the state of well [3](well_number)?
+    - Give me information about well [4](well_number)
+    - Check well [5](well_number) status
+    - Is well [12](well_number) active?
+    - What are the readings from well [7](well_number)?
+    - Show me data for well [8](well_number)
+    - Current status of well [9](well_number) please

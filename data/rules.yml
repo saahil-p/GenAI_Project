@@ -1,0 +1,27 @@
+version: "3.1"
+
+rules:
+- rule: Greet the user
+  steps:
+  - intent: greet
+  - action: utter_greet
+
+- rule: Say goodbye
+  steps:
+  - intent: goodbye
+  - action: utter_goodbye
+
+- rule: Handle RAG-based oil extraction queries
+  steps:
+  - intent: ask_oil_extraction
+  - action: action_rag_query
+
+- rule: Handle sensor queries
+  steps:
+  - intent: ask_sensor
+  - action: action_sensor_query
+
+- rule: Handle well status queries
+  steps:
+  - intent: ask_well_status
+  - action: action_well_status

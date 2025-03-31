@@ -1,0 +1,43 @@
+version: "3.1"
+
+stories:
+
+- story: basic interaction flow
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_well_status
+  - action: action_well_status
+  - intent: goodbye
+  - action: utter_goodbye
+
+- story: sensor query flow
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_sensor
+  - action: action_sensor_query
+  - intent: goodbye
+  - action: utter_goodbye
+
+- story: oil extraction query flow
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_oil_extraction
+  - action: action_rag_query
+  - intent: goodbye
+  - action: utter_goodbye
+
+- story: multiple queries flow
+  steps:
+  - intent: greet
+  - action: utter_greet
+  - intent: ask_well_status
+  - action: action_well_status
+  - intent: ask_sensor
+  - action: action_sensor_query
+  - intent: ask_oil_extraction
+  - action: action_rag_query
+  - intent: goodbye
+  - action: utter_goodbye
