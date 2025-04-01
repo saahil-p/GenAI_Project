@@ -32,20 +32,28 @@ import hashlib
 import time
 import ssl
 import requests
+import time
+import ssl
+import requests
 from typing import Any, Text, Dict, List
 from rasa_sdk import Action, Tracker
 from rasa_sdk.executor import CollectingDispatcher
+from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.utilities import GoogleSearchAPIWrapper
+from langchain_community.utilities import GoogleSearchAPIWrapper
 
 try:
     from langchain_community.vectorstores import Chroma
     print("Using new langchain_community.vectorstores package.")
+    from langchain_community.vectorstores import Chroma
+    print("Using new langchain_community.vectorstores package.")
 except ImportError:
     from langchain.vectorstores import Chroma
+    print("langchain_community.vectorstores not installed. Falling back to legacy import.")
     print("langchain_community.vectorstores not installed. Falling back to legacy import.")
 
 from langchain_huggingface import HuggingFacePipeline
@@ -205,8 +213,28 @@ def get_embedding_fn():
     if _embedding_fn is None:
         raise RuntimeError("Embedding function not initialized")
     return _embedding_fn
+    """Get the cached embedding function."""
+    if _embedding_fn is None:
+        raise RuntimeError("Embedding function not initialized")
+    return _embedding_fn
 
 def get_chroma_db():
+    """Get the cached Chroma DB instance."""
+    if _chroma_db is None:
+        raise RuntimeError("Chroma DB not initialized")
+    return _chroma_db
+
+def get_llm():
+    """Get the cached LLM instance."""
+    if _llm_instance is None:
+        raise RuntimeError("LLM not initialized")
+    return _llm_instance
+
+def get_qa_chain():
+    """Get the cached QA chain."""
+    if _qa_chain is None:
+        raise RuntimeError("QA chain not initialized")
+    return _qa_chain
     """Get the cached Chroma DB instance."""
     if _chroma_db is None:
         raise RuntimeError("Chroma DB not initialized")
@@ -401,6 +429,7 @@ def run_well_status_query(query: str, well_number: str) -> str:
         
     except Exception as e:
         print(f"Error in run_well_status_query: {str(e)}")
+        return f"I encountered an error while processing your query about Well {well_number}. Please try again."
         return f"I encountered an error while processing your query about Well {well_number}. Please try again."
 
 class ActionRAGQuery(Action):

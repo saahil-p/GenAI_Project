@@ -52,4 +52,14 @@ chroma_db/
 
 # Large data files
 *.csv
-*.json huggingface_token
+*.json
+
+# Sensitive files
+huggingface_token
+*.pth
+
+# Cache and temporary files
+__pycache__/
+*.pyc
+.rasa/
+models/
