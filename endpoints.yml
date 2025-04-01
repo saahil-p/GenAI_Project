@@ -12,9 +12,9 @@
 
 action_endpoint:
   url: "http://localhost:5055/webhook"
-  timeout: 300  # 1 minute timeout
-  retries: 2    # Number of retries
-  retry_delay: 2  # Delay between retries in seconds
+  timeout: 900000  # 10,000 seconds (nearly 3 hours) timeout
+  retries: 3    # Number of retries
+  retry_delay: 5  # Delay between retries in seconds
 
 # Tracker store which is used to store the conversations.
 # By default the conversations are stored in memory.
