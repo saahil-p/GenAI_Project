@@ -92,7 +92,7 @@ def initialize_models():
         else:
             device = torch.device("cpu")
             print("MPS not available. Falling back to CPU.")
-        
+
         # Initialize embedding function with SSL verification disabled
         print("Loading embedding model...")
         try:
@@ -278,6 +278,35 @@ def perform_web_search(query: str) -> str:
         print(f"Error in web search: {str(e)}")
         return None
 
+def clean_response(response: str) -> str:
+    """Clean up response by removing formatting and incomplete sentences."""
+    import re
+    
+    # First, remove all content between pipe characters and clean formatting
+    response = re.sub(r'\|[^|]*\|', ' ', response)  # Replace content between pipes with a space
+    response = response.replace("|", "")  # Remove any remaining pipe characters
+    response = re.sub(r'[-=_]{3,}', '', response)  # Remove long sequences of formatting characters
+    
+    # Clean up extra whitespace
+    response = re.sub(r'\s+', ' ', response)
+    
+    # Split into sentences (considering multiple punctuation marks)
+    sentences = re.split(r'(?<=[.!?])\s+', response)
+    
+    # Keep only complete sentences
+    complete_sentences = []
+    for sentence in sentences:
+        # Check if sentence is complete (starts with capital letter, ends with punctuation)
+        if (sentence and 
+            sentence[0].isupper() and  # Starts with capital letter
+            sentence[-1] in '.!?' and  # Ends with proper punctuation
+            len(sentence.split()) > 2):  # Has at least 3 words (likely complete)
+            complete_sentences.append(sentence)
+    
+    # Join complete sentences back together
+    cleaned_response = ' '.join(complete_sentences)
+    return cleaned_response.strip()
+
 def run_rag_query(query: str) -> str:
     """Run a RAG query using cached models, falling back to web search if needed."""
     try:
@@ -311,32 +340,26 @@ def run_sensor_query(query: str, sensor_name: str) -> str:
         qa_chain = get_qa_chain()
         
         # Create a more specific query that includes the sensor context
-        enhanced_query = f"Regarding the {sensor_name} sensor in oil wells: {query}. Provide a clear, technical explanation of what this sensor is and its purpose. Focus on its main function and operational significance. Provide the three operational states."
+        enhanced_query = f"Regarding the {sensor_name} sensor in oil wells: {query}. Provide a clear, technical explanation of what this sensor is and its purpose. Focus on its main function and operational significance. Exclude any technical specifications or state values unless specifically asked for. Use complete sentences."
         
         # Run the query
         result = qa_chain.invoke({"query": enhanced_query})
         response = result.get("result", "")
         
-        # Post-process the response to remove formatting and irrelevant content
-        # First, remove content between pipe characters
-        import re
-        response = re.sub(r'\|[^|]*\|', '', response)  # Remove content between pipes
-        response = response.replace("|", "")  # Remove any remaining pipe characters
-        response = re.sub(r'-{3,}', '', response)  # Remove sequences of 3 or more dashes
-        response = re.sub(r'\s+', ' ', response)  # Normalize whitespace
-        # Remove lines that are just formatting characters
-        response = "\n".join(line.strip() for line in response.split("\n") 
-                           if line.strip() and not all(c in '-|' for c in line))
-        response = response.strip()
+        # Clean and post-process the response
+        response = clean_response(response)
         
-        # Check if the response indicates no information
-        if "don't have" in response.lower() or "not enough information" in response.lower():
-            print(f"No information found in RAG for sensor {sensor_name}, trying web search...")
+        # Check if we have a valid response after cleaning
+        if not response:
+            print(f"No valid response after cleaning for sensor {sensor_name}, trying web search...")
             web_result = perform_web_search(f"{sensor_name} sensor oil well")
             
             if web_result:
-                return f"Based on web search: {web_result}"
-            elif _search is None:
+                web_result = clean_response(web_result)
+                if web_result:
+                    return f"Based on web search: {web_result}"
+            
+            if _search is None:
                 return f"I don't have enough information about the {sensor_name} sensor, and web search is not available. Please ensure Google Search API is properly configured."
             
         return response or f"I couldn't find specific information about the {sensor_name} sensor."
@@ -352,20 +375,26 @@ def run_well_status_query(query: str, well_number: str) -> str:
         qa_chain = get_qa_chain()
         
         # Create a more specific query that includes the well context
-        enhanced_query = f"Regarding Well {well_number}: {query}"
+        enhanced_query = f"Regarding Well {well_number}: {query}. Provide your response in complete sentences."
         
         # Run the query
         result = qa_chain.invoke({"query": enhanced_query})
         response = result.get("result", "")
         
-        # Check if the response indicates no information
-        if "don't have" in response.lower() or "not enough information" in response.lower():
-            print(f"No information found in RAG for Well {well_number}, trying web search...")
+        # Clean and post-process the response
+        response = clean_response(response)
+        
+        # Check if we have a valid response after cleaning
+        if not response:
+            print(f"No valid response after cleaning for Well {well_number}, trying web search...")
             web_result = perform_web_search(query)
             
             if web_result:
-                return f"Based on web search: {web_result}"
-            elif _search is None:
+                web_result = clean_response(web_result)
+                if web_result:
+                    return f"Based on web search: {web_result}"
+            
+            if _search is None:
                 return f"I don't have enough information about this query, and web search is not available. Please ensure Google Search API is properly configured."
             
         return response or f"I couldn't find specific information about Well {well_number}."
