@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Oil Well Monitoring Assistant</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #333;
+        }
+        .header h1 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        .header p {
+            color: #7f8c8d;
+            font-size: 16px;
+        }
+        .chat-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 500px;
+        }
+        #messages {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 15px;
+            padding: 10px;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+        }
+        .message {
+            margin-bottom: 10px;
+            padding: 10px;
+            border-radius: 15px;
+            max-width: 80%;
+        }
+        .user-message {
+            background-color: #2c3e50;
+            color: white;
+            align-self: flex-end;
+            margin-left: auto;
+        }
+        .bot-message {
+            background-color: #f0f2f5;
+            color: #333;
+            align-self: flex-start;
+        }
+        .input-area {
+            display: flex;
+            gap: 10px;
+        }
+        #user-input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #2c3e50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #34495e;
+        }
+        .loading-indicator {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #2c3e50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .system-message {
+            background-color: #e8f5e9;
+            color: #2e7d32;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Oil Well Monitoring Assistant</h1>
+        <p>Ask me about oil well sensors and extraction processes</p>
+    </div>
+    <div class="chat-container">
+        <div id="messages"></div>
+        <div class="input-area">
+            <input type="text" id="user-input" placeholder="Ask about sensors (e.g., 'What is P-PDG?') or oil extraction..." disabled />
+            <button id="send-button" disabled>Send</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const messagesDiv = document.getElementById('messages');
+            const userInput = document.getElementById('user-input');
+            const sendButton = document.getElementById('send-button');
+            let systemInitialized = false;
+            
+            // Function to add a message to the chat
+            function addMessage(message, sender, isSystem = false) {
+                const messageElement = document.createElement('div');
+                messageElement.classList.add('message');
+                if (isSystem) {
+                    messageElement.classList.add('system-message');
+                } else {
+                    messageElement.classList.add(sender === 'user' ? 'user-message' : 'bot-message');
+                }
+                messageElement.textContent = message;
+                messagesDiv.appendChild(messageElement);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+
+            // Function to add loading indicator
+            function addLoadingIndicator(message) {
+                const loadingElement = document.createElement('div');
+                loadingElement.classList.add('loading-indicator');
+                loadingElement.innerHTML = `
+                    <div class="loading-spinner"></div>
+                    <span>${message}</span>
+                `;
+                messagesDiv.appendChild(loadingElement);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                return loadingElement;
+            }
+            
+            // Function to send message to Rasa
+            async function sendMessage(message, isInitialGreeting = false) {
+                try {
+                    const loadingElement = addLoadingIndicator(
+                        isInitialGreeting ? 
+                        "Initializing system and loading models..." : 
+                        "Processing your request..."
+                    );
+                    
+                    const response = await fetch('http://localhost:5005/webhooks/rest/webhook', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ 
+                            sender: 'user',
+                            message: message 
+                        })
+                    });
+                    
+                    // Remove loading indicator
+                    if (loadingElement && loadingElement.parentNode) {
+                        loadingElement.parentNode.removeChild(loadingElement);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.length > 0) {
+                        data.forEach(msg => {
+                            if (msg.text) {
+                                addMessage(msg.text, 'bot');
+                            }
+                            if (msg.image) {
+                                const imgElement = document.createElement('img');
+                                imgElement.src = msg.image;
+                                imgElement.style.maxWidth = '100%';
+                                
+                                const messageElement = document.createElement('div');
+                                messageElement.classList.add('message', 'bot-message');
+                                messageElement.appendChild(imgElement);
+                                messagesDiv.appendChild(messageElement);
+                            }
+                        });
+
+                        // If this was the initial greeting, enable the input
+                        if (isInitialGreeting && !systemInitialized) {
+                            systemInitialized = true;
+                            userInput.disabled = false;
+                            sendButton.disabled = false;
+                            addMessage("System initialized and ready for queries!", "bot", true);
+                        }
+                    } else {
+                        addMessage("I'm sorry, I couldn't process that request.", 'bot');
+                    }
+                } catch (error) {
+                    console.error('Error:', error);
+                    // Remove loading indicator if it exists
+                    if (loadingElement && loadingElement.parentNode) {
+                        loadingElement.parentNode.removeChild(loadingElement);
+                    }
+                    
+                    if (isInitialGreeting) {
+                        // If initial greeting failed, retry after a delay
+                        addMessage("System is still initializing. Retrying in 5 seconds...", "bot", true);
+                        setTimeout(() => initializeSystem(), 5000);
+                    } else {
+                        addMessage("Sorry, there was an error connecting to the server.", 'bot');
+                    }
+                }
+            }
+            
+            // Function to initialize the system
+            function initializeSystem() {
+                addMessage("Initializing system...", "bot", true);
+                // Send initial greeting with longer timeout
+                sendMessage('/greet', true);
+            }
+
+            // Start initialization after a short delay
+            setTimeout(initializeSystem, 2000);
+            
+            // Event listeners
+            sendButton.addEventListener('click', () => {
+                const message = userInput.value.trim();
+                if (message) {
+                    addMessage(message, 'user');
+                    sendMessage(message);
+                    userInput.value = '';
+                }
+            });
+            
+            userInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    const message = userInput.value.trim();
+                    if (message) {
+                        addMessage(message, 'user');
+                        sendMessage(message);
+                        userInput.value = '';
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
