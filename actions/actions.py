@@ -29,57 +29,203 @@
 import os
 import torch
 import hashlib
+import time
+import ssl
+import requests
 from typing import Any, Text, Dict, List
 from rasa_sdk import Action, Tracker
 from rasa_sdk.executor import CollectingDispatcher
-from langchain.document_loaders import DirectoryLoader, TextLoader
+from langchain_community.document_loaders import DirectoryLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.utilities import GoogleSearchAPIWrapper
 
 try:
-    from langchain_chroma import Chroma
-    print("Using new langchain_chroma package.")
+    from langchain_community.vectorstores import Chroma
+    print("Using new langchain_community.vectorstores package.")
 except ImportError:
     from langchain.vectorstores import Chroma
-    print("langchain_chroma not installed. Falling back to legacy import.")
+    print("langchain_community.vectorstores not installed. Falling back to legacy import.")
 
 from langchain_huggingface import HuggingFacePipeline
 from langchain.chains import RetrievalQA
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 from langchain.prompts import PromptTemplate
 
-if torch.backends.mps.is_available():
-    device = torch.device("mps")
-    torch.set_default_device("mps")
-    print("Using MPS for acceleration.")
-else:
-    device = torch.device("cpu")
-    print("MPS not available. Falling back to CPU.")
+# Global variables for caching
+_embedding_fn = None
+_chroma_db = None
+_tokenizer = None
+_model = None
+_llm_instance = None
+_qa_chain = None
+_search = None  # Add global search instance
 
+# Constants
 TXT_DIRECTORY = "/Users/saahil/Desktop/College/Sem 6/GenAI/RAG"
 CHROMA_PATH = "/Users/saahil/Desktop/College/Sem 6/GenAI/RAG/chroma_db"
 MODEL_ID = "google/flan-t5-small"
 
+def initialize_models():
+    """Initialize all models and databases when the server starts."""
+    global _embedding_fn, _chroma_db, _tokenizer, _model, _llm_instance, _qa_chain, _search
+    
+    try:
+        print("Starting model initialization...")
+        start_time = time.time()
+        
+        # Initialize Google Search
+        try:
+            print("Initializing Google Search...")
+            _search = GoogleSearchAPIWrapper()
+        except Exception as e:
+            print(f"Failed to initialize Google Search: {str(e)}")
+            print("Please ensure GOOGLE_API_KEY and GOOGLE_CSE_ID environment variables are set.")
+            _search = None
+
+        # Set device
+        if torch.backends.mps.is_available():
+            device = torch.device("mps")
+            torch.set_default_device("mps")
+            print("Using MPS for acceleration.")
+        else:
+            device = torch.device("cpu")
+            print("MPS not available. Falling back to CPU.")
+        
+        # Initialize embedding function with SSL verification disabled
+        print("Loading embedding model...")
+        try:
+            # First try with default settings
+            _embedding_fn = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        except requests.exceptions.SSLError:
+            print("SSL verification failed, retrying with verification disabled...")
+            # If SSL fails, try with verification disabled
+            _embedding_fn = HuggingFaceEmbeddings(
+                model_name="sentence-transformers/all-MiniLM-L6-v2",
+                model_kwargs={'trust_remote_code': True},
+                encode_kwargs={'normalize_embeddings': True}
+            )
+        
+        # Initialize or load Chroma DB
+        print("Initializing Chroma DB...")
+        if not os.path.exists(CHROMA_PATH):
+            print("Creating new Chroma DB...")
+            # Load and process documents
+            loader = DirectoryLoader(TXT_DIRECTORY, glob="**/*.txt", loader_cls=TextLoader)
+            documents = loader.load()
+            text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+            texts = text_splitter.split_documents(documents)
+            
+            # Create new Chroma DB
+            _chroma_db = Chroma.from_documents(
+                documents=texts,
+                embedding=_embedding_fn,
+                persist_directory=CHROMA_PATH
+            )
+            _chroma_db.persist()
+        else:
+            print("Loading existing Chroma DB...")
+            _chroma_db = Chroma(persist_directory=CHROMA_PATH, embedding_function=_embedding_fn)
+        
+        # Initialize language model with SSL verification disabled
+        print("Loading language model...")
+        try:
+            _tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, trust_remote_code=True)
+            _model = AutoModelForSeq2SeqLM.from_pretrained(
+                MODEL_ID, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True
+            )
+        except requests.exceptions.SSLError:
+            print("SSL verification failed for language model, retrying with verification disabled...")
+            # If SSL fails, try with verification disabled
+            _tokenizer = AutoTokenizer.from_pretrained(
+                MODEL_ID, trust_remote_code=True, local_files_only=True
+            )
+            _model = AutoModelForSeq2SeqLM.from_pretrained(
+                MODEL_ID, device_map="auto", torch_dtype=torch.float16, trust_remote_code=True, local_files_only=True
+            )
+        
+        # Create LLM pipeline
+        llm_pipeline = pipeline(
+            "text2text-generation",
+            model=_model,
+            tokenizer=_tokenizer,
+            max_new_tokens=250,
+            min_new_tokens=10,
+            do_sample=False
+        )
+        _llm_instance = HuggingFacePipeline(pipeline=llm_pipeline)
+        
+        # Create QA chain
+        print("Creating QA chain...")
+        retriever = _chroma_db.as_retriever(search_kwargs={"k": 3})
+        prompt_template = """<|system|>
+You are an expert assistant specialized in oil well extraction. Your task is to provide accurate, concise information based ONLY on the context provided.
+If the context doesn't contain enough information to answer the question, you must say "I don't have enough information to answer this question."
+Do not make up information or rely on prior knowledge not present in the context.
+Respond in a clear, formal, and professional manner. 
+<|user|>
+Context information:
+{context}
+
+Based on this context, answer the following question: {question}
+<|assistant|>
+"""
+        PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+        _qa_chain = RetrievalQA.from_chain_type(
+            llm=_llm_instance,
+            chain_type="stuff",
+            retriever=retriever,
+            chain_type_kwargs={"prompt": PROMPT}
+        )
+        
+        end_time = time.time()
+        print(f"Model initialization completed in {end_time - start_time:.2f} seconds")
+        
+    except Exception as e:
+        print(f"Error during model initialization: {str(e)}")
+        # Try to provide more helpful error messages
+        if "SSL" in str(e):
+            print("SSL verification error detected. This might be due to network security settings.")
+            print("Please check your network connection and SSL certificate settings.")
+        elif "Connection" in str(e):
+            print("Connection error detected. Please check your internet connection.")
+        raise
+
+# Initialize models when the module is loaded
+try:
+    initialize_models()
+except Exception as e:
+    print(f"Failed to initialize models: {str(e)}")
+    # You might want to handle this error differently based on your requirements
+    raise
+
 def get_embedding_fn():
-    return HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    """Get the cached embedding function."""
+    if _embedding_fn is None:
+        raise RuntimeError("Embedding function not initialized")
+    return _embedding_fn
 
 def get_chroma_db():
-    return Chroma(persist_directory=CHROMA_PATH, embedding_function=get_embedding_fn())
+    """Get the cached Chroma DB instance."""
+    if _chroma_db is None:
+        raise RuntimeError("Chroma DB not initialized")
+    return _chroma_db
+
+def get_llm():
+    """Get the cached LLM instance."""
+    if _llm_instance is None:
+        raise RuntimeError("LLM not initialized")
+    return _llm_instance
+
+def get_qa_chain():
+    """Get the cached QA chain."""
+    if _qa_chain is None:
+        raise RuntimeError("QA chain not initialized")
+    return _qa_chain
 
 def get_retriever(db):
     return db.as_retriever(search_kwargs={"k": 3})
-
-def get_llm():
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    model = AutoModelForSeq2SeqLM.from_pretrained(
-        MODEL_ID, device_map="auto", torch_dtype=torch.float16
-    )
-    llm_pipeline = pipeline(
-        "text2text-generation", model=model, tokenizer=tokenizer,
-        max_new_tokens=250, min_new_tokens=10, do_sample=False
-    )
-    return HuggingFacePipeline(pipeline=llm_pipeline)
 
 def setup_qa_pipeline(db):
     retriever = get_retriever(db)
@@ -99,99 +245,134 @@ Based on this context, answer the following question: {question}
     PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
     return RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever, chain_type_kwargs={"prompt": PROMPT})
 
-def run_rag_query(query_text: str) -> str:
-    db_instance = get_chroma_db()
-    qa_pipeline = setup_qa_pipeline(db_instance)
-    response = qa_pipeline.invoke({"query": query_text})
-    return response['result']
-
-def run_sensor_query(query_text: str, sensor_name: str) -> str:
-    db_instance = get_chroma_db()
-    qa_pipeline = setup_qa_pipeline(db_instance)
-    
-    # Create context from sensor description
-    sensor_context = f"""
-    The sensor {sensor_name} is {SENSOR_DESCRIPTIONS.get(sensor_name, 'not found in the system')}.
-    This sensor is part of an oil well monitoring system.
-    """
-    
-    # Modify the prompt to include sensor context
-    prompt_template = """<|system|>
-You are an expert assistant specialized in oil well sensors and monitoring. Your task is to provide accurate, concise information based on the context provided.
-If the context doesn't contain enough information to answer the question, you must say "I don't have enough information to answer this question."
-Do not make up information or rely on prior knowledge not present in the context.
-Respond in a clear, formal, and professional manner. 
-<|user|>
-Context information:
-{context}
-
-Based on this context, answer the following question: {question}
-<|assistant|>
-"""
-    PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-    
-    # Create a new chain with the modified prompt
-    chain = RetrievalQA.from_chain_type(
-        llm=get_llm(),
-        chain_type="stuff",
-        retriever=db_instance.as_retriever(search_kwargs={"k": 3}),
-        chain_type_kwargs={"prompt": PROMPT}
-    )
-    
-    # Combine the sensor context with the query
-    combined_query = f"{sensor_context}\n\nQuestion: {query_text}"
-    response = chain.invoke({"query": combined_query})
-    return response['result']
-
-def run_well_status_query(query_text: str, well_number: str) -> str:
+def perform_web_search(query: str) -> str:
+    """Perform a web search and return a summarized response."""
     try:
-        print(f"Starting well status query for well {well_number}")
-        db_instance = get_chroma_db()
-        print("Got chroma DB instance")
-        
-        # Create context from well number
-        well_context = f"""
-        Well {well_number} is one of the monitored oil wells in the production field.
-        This well is equipped with various sensors for monitoring pressure, temperature, flow rates, and valve states.
-        Well numbers are used to identify specific extraction points in the oil field.
-        """
-        
-        # Modify the prompt to include well context
-        prompt_template = """<|system|>
-You are an expert assistant specialized in oil well monitoring and operations. Your task is to provide accurate, concise information based on the context provided.
-If the context doesn't contain enough information to answer the question, you must say "I don't have enough information to answer this question, but I can provide general information about oil well operations."
-Do not make up specific operational data, but you can explain how well monitoring systems work in general.
-Respond in a clear, formal, and professional manner.
-<|user|>
-Context information:
-{context}
+        if _search is None:
+            print("Web search is not available - Google Search API not initialized")
+            return None
 
-Based on this context, answer the following question: {question}
-<|assistant|>
-"""
-        PROMPT = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
-        print("Created prompt template")
+        # Search the web for information
+        search_query = f"oil well {query} technical definition operation"
+        print(f"Performing web search for: {search_query}")
         
-        # Create a new chain with the modified prompt
-        chain = RetrievalQA.from_chain_type(
-            llm=get_llm(),
-            chain_type="stuff",
-            retriever=db_instance.as_retriever(search_kwargs={"k": 3}),
-            chain_type_kwargs={"prompt": PROMPT}
-        )
-        print("Created chain")
+        # Get web search results
+        search_results = _search.run(search_query)
         
-        # Combine the well context with the query
-        combined_query = f"{well_context}\n\nQuestion: {query_text}"
-        print("Sending query to chain")
+        # If no results found, return None
+        if not search_results:
+            return None
+            
+        # Create a prompt to summarize the web results
+        summary_prompt = f"""Based on these search results about {query}, provide a clear, technical explanation in 2-3 sentences:
         
-        # Invoke the chain with properly formatted inputs
-        response = chain.invoke({"query": combined_query})
-        print("Got response from chain")
-        return response['result']
+{search_results}"""
+        
+        # Use the QA chain to summarize the results
+        qa_chain = get_qa_chain()
+        summary = qa_chain.invoke({"query": summary_prompt})
+        
+        return summary.get("result", None)
+        
+    except Exception as e:
+        print(f"Error in web search: {str(e)}")
+        return None
+
+def run_rag_query(query: str) -> str:
+    """Run a RAG query using cached models, falling back to web search if needed."""
+    try:
+        # Get the cached QA chain
+        qa_chain = get_qa_chain()
+        
+        # Run the query
+        result = qa_chain.invoke({"query": query})
+        response = result.get("result", "")
+        
+        # Check if the response indicates no information
+        if "don't have" in response.lower() or "not enough information" in response.lower():
+            print("No information found in RAG, trying web search...")
+            web_result = perform_web_search(query)
+            
+            if web_result:
+                return f"Based on web search: {web_result}"
+            elif _search is None:
+                return "I don't have enough information to answer this question, and web search is not available. Please ensure Google Search API is properly configured."
+            
+        return response or "I couldn't find a relevant answer to your question."
+        
+    except Exception as e:
+        print(f"Error in run_rag_query: {str(e)}")
+        return "I encountered an error while processing your query. Please try again."
+
+def run_sensor_query(query: str, sensor_name: str) -> str:
+    """Run a sensor-specific query using cached models, falling back to web search if needed."""
+    try:
+        # Get the cached QA chain
+        qa_chain = get_qa_chain()
+        
+        # Create a more specific query that includes the sensor context
+        enhanced_query = f"Regarding the {sensor_name} sensor in oil wells: {query}. Provide a clear, technical explanation of what this sensor is and its purpose. Focus on its main function and operational significance. Provide the three operational states."
+        
+        # Run the query
+        result = qa_chain.invoke({"query": enhanced_query})
+        response = result.get("result", "")
+        
+        # Post-process the response to remove formatting and irrelevant content
+        # First, remove content between pipe characters
+        import re
+        response = re.sub(r'\|[^|]*\|', '', response)  # Remove content between pipes
+        response = response.replace("|", "")  # Remove any remaining pipe characters
+        response = re.sub(r'-{3,}', '', response)  # Remove sequences of 3 or more dashes
+        response = re.sub(r'\s+', ' ', response)  # Normalize whitespace
+        # Remove lines that are just formatting characters
+        response = "\n".join(line.strip() for line in response.split("\n") 
+                           if line.strip() and not all(c in '-|' for c in line))
+        response = response.strip()
+        
+        # Check if the response indicates no information
+        if "don't have" in response.lower() or "not enough information" in response.lower():
+            print(f"No information found in RAG for sensor {sensor_name}, trying web search...")
+            web_result = perform_web_search(f"{sensor_name} sensor oil well")
+            
+            if web_result:
+                return f"Based on web search: {web_result}"
+            elif _search is None:
+                return f"I don't have enough information about the {sensor_name} sensor, and web search is not available. Please ensure Google Search API is properly configured."
+            
+        return response or f"I couldn't find specific information about the {sensor_name} sensor."
+        
+    except Exception as e:
+        print(f"Error in run_sensor_query: {str(e)}")
+        return f"I encountered an error while processing your query about the {sensor_name} sensor. Please try again."
+
+def run_well_status_query(query: str, well_number: str) -> str:
+    """Run a well status query using cached models, falling back to web search if needed."""
+    try:
+        # Get the cached QA chain
+        qa_chain = get_qa_chain()
+        
+        # Create a more specific query that includes the well context
+        enhanced_query = f"Regarding Well {well_number}: {query}"
+        
+        # Run the query
+        result = qa_chain.invoke({"query": enhanced_query})
+        response = result.get("result", "")
+        
+        # Check if the response indicates no information
+        if "don't have" in response.lower() or "not enough information" in response.lower():
+            print(f"No information found in RAG for Well {well_number}, trying web search...")
+            web_result = perform_web_search(query)
+            
+            if web_result:
+                return f"Based on web search: {web_result}"
+            elif _search is None:
+                return f"I don't have enough information about this query, and web search is not available. Please ensure Google Search API is properly configured."
+            
+        return response or f"I couldn't find specific information about Well {well_number}."
+        
     except Exception as e:
         print(f"Error in run_well_status_query: {str(e)}")
-        return f"I encountered an error while processing your query: {str(e)}"
+        return f"I encountered an error while processing your query about Well {well_number}. Please try again."
 
 class ActionRAGQuery(Action):
     def name(self) -> Text:
