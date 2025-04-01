@@ -311,23 +311,24 @@ def run_sensor_query(query: str, sensor_name: str) -> str:
         qa_chain = get_qa_chain()
         
         # Create a more specific query that includes the sensor context
-        enhanced_query = f"Regarding the {sensor_name} sensor in oil wells: {query}. Provide a clear, technical explanation of what this sensor is and its purpose. Focus on its main function and operational significance. Provide the three operational states."
+        enhanced_query = f"Regarding the {sensor_name} sensor in oil wells: {query}. Provide a clear, technical explanation of what this sensor is and its purpose. Focus on its main function and operational significance. Exclude any technical specifications or state values unless specifically asked for."
         
         # Run the query
         result = qa_chain.invoke({"query": enhanced_query})
         response = result.get("result", "")
         
         # Post-process the response to remove formatting and irrelevant content
-        # First, remove content between pipe characters
         import re
-        response = re.sub(r'\|[^|]*\|', '', response)  # Remove content between pipes
+        # First, remove all content between pipe characters
+        response = re.sub(r'\|[^|]*\|', ' ', response)  # Replace content between pipes with a space
         response = response.replace("|", "")  # Remove any remaining pipe characters
-        response = re.sub(r'-{3,}', '', response)  # Remove sequences of 3 or more dashes
-        response = re.sub(r'\s+', ' ', response)  # Normalize whitespace
-        # Remove lines that are just formatting characters
-        response = "\n".join(line.strip() for line in response.split("\n") 
-                           if line.strip() and not all(c in '-|' for c in line))
-        response = response.strip()
+        # Remove long sequences of dashes or other formatting characters
+        response = re.sub(r'[-=_]{3,}', '', response)
+        # Remove lines that are just formatting
+        response = '\n'.join(line.strip() for line in response.split('\n') 
+                           if line.strip() and not all(c in '-|=_' for c in line))
+        # Clean up extra whitespace
+        response = re.sub(r'\s+', ' ', response).strip()
         
         # Check if the response indicates no information
         if "don't have" in response.lower() or "not enough information" in response.lower():
@@ -529,3 +530,4 @@ class ActionWellStatus(Action):
             print(f"Error in ActionWellStatus: {str(e)}")
             dispatcher.utter_message(text=f"I encountered an error while processing your request: {str(e)}")
             return []
+            
